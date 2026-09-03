@@ -90,7 +90,8 @@ export default function NetworkPage() {
             const { data: { user } } = await supabase.auth.getUser();
             const res = await executeClusterQuarantine(target, user?.id);
             if (res.success) {
-                setActionMessage(`✅ QUARANTINE SUCCESSFUL: ${res.quarantinedCount} accounts quarantined. ₹${res.totalCapitalSecured.toLocaleString('en-IN')} capital secured.`);
+                const capital = (res.totalCapitalSecured || 0).toLocaleString('en-IN');
+                setActionMessage(`✅ QUARANTINE SUCCESSFUL: ${res.quarantinedCount || 0} accounts quarantined. ₹${capital} capital secured.`);
                 fetchHeteroData();
             } else {
                 alert(`Error: ${res.error}`);
