@@ -77,14 +77,63 @@ export function InvestigatorChat({ explanation }: ChatProps) {
     };
 
     const formatContent = (content: string) => {
-        return content
-            .replace(/\n/g, '<br/>')
-            .replace(/\*\*(.*?)\*\*/g, '<strong class="text-cyan-400">$1</strong>')
-            .replace(/`{3}([\s\S]*?)`{3}/g, '<pre class="bg-slate-800 p-2 rounded my-2 overflow-x-auto text-xs">$1</pre>')
-            .replace(/`([^`]+)`/g, '<code class="bg-slate-800 px-1 rounded text-cyan-300">$1</code>')
-            .replace(/##\s(.+?)(<br|$)/g, '<h3 class="text-lg font-bold text-purple-400 mt-3 mb-2">$1</h3>')
-            .replace(/•\s/g, '<span class="text-cyan-500 mr-1">•</span>')
-            .replace(/🔴|🟠|🟡|🟢|⚠️|🚨|🔒|📋|🔍|📞|🌐|📧|⚖️|⛔|💳|🤖|📊|📱|💸|🔑|🛡️|🏷️/g, '<span class="text-lg">$&</span>');
+        if (!content) return '';
+
+        // Pre-process code blocks first to preserve content
+        const codeBlocks: string[] = [];
+        let processed = content.replace(/```([\s\S]*?)```/g, (_, code) => {
+            codeBlocks.push(`<pre class="bg-slate-900/90 border border-slate-700 p-2.5 rounded-lg my-2 overflow-x-auto text-xs text-cyan-300 font-mono"><code>${code.trim()}</code></pre>`);
+            return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+        });
+
+        // Pre-process inline code
+        processed = processed.replace(/`([^`]+)`/g, '<code class="bg-slate-800 text-cyan-300 px-1.5 py-0.5 rounded text-xs font-mono">$1</code>');
+
+        // Headers
+        processed = processed.replace(/^### (.*$)/gim, '<h4 class="text-sm font-bold text-cyan-300 mt-3 mb-1.5 flex items-center gap-1.5">$1</h4>');
+        processed = processed.replace(/^## (.*$)/gim, '<h3 class="text-base font-bold text-purple-400 mt-4 mb-2 flex items-center gap-2">$1</h3>');
+        processed = processed.replace(/^# (.*$)/gim, '<h2 class="text-lg font-extrabold text-white mt-4 mb-2 pb-1 border-b border-slate-700">$1</h2>');
+
+        // Horizontal dividers
+        processed = processed.replace(/^---$/gim, '<hr class="border-slate-800 my-3" />');
+
+        // Bullet list items (* item or - item or • item)
+        processed = processed.replace(/^[*\-•]\s+(.*$)/gim, '<div class="flex items-start gap-2 my-1 pl-1"><span class="text-cyan-400 text-sm leading-none mt-1">•</span><span class="flex-1">$1</span></div>');
+
+        // Numbered list items (1. item)
+        processed = processed.replace(/^(\d+)\.\s+(.*$)/gim, '<div class="flex items-start gap-2 my-1 pl-1"><span class="text-purple-400 font-mono text-xs font-bold mt-0.5">$1.</span><span class="flex-1">$2</span></div>');
+
+        // Bold and Italics
+        processed = processed.replace(/\*\*(.*?)\*\*/g, '<strong class="text-cyan-300 font-semibold">$1</strong>');
+        processed = processed.replace(/__(.*?)__/g, '<strong class="text-cyan-300 font-semibold">$1</strong>');
+        processed = processed.replace(/\*([^*\n]+)\*/g, '<em class="text-slate-300 italic">$1</em>');
+
+        // Risk and Alert Badges
+        processed = processed.replace(/\b(CRITICAL|HIGH RISK|CRITICAL RISK)\b/g, '<span class="px-1.5 py-0.5 rounded text-[11px] font-bold bg-red-900/60 text-red-300 border border-red-700/50">$1</span>');
+        processed = processed.replace(/\b(HIGH)\b/g, '<span class="px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-900/60 text-amber-300 border border-amber-700/50">$1</span>');
+        processed = processed.replace(/\b(MODERATE|MEDIUM)\b/g, '<span class="px-1.5 py-0.5 rounded text-[11px] font-bold bg-yellow-900/60 text-yellow-300 border border-yellow-700/50">$1</span>');
+        processed = processed.replace(/\b(LOW|CLEAN|SAFE)\b/g, '<span class="px-1.5 py-0.5 rounded text-[11px] font-bold bg-emerald-900/60 text-emerald-300 border border-emerald-700/50">$1</span>');
+        processed = processed.replace(/\b(FROZEN|QUARANTINED)\b/g, '<span class="px-1.5 py-0.5 rounded text-[11px] font-bold bg-cyan-900/60 text-cyan-300 border border-cyan-700/50">$1</span>');
+
+        // Line breaks (convert remaining single newlines that aren't inside div tags)
+        const lines = processed.split('\n');
+        const formattedLines = lines.map(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return '<div class="h-2"></div>';
+            if (trimmed.startsWith('<div') || trimmed.startsWith('<h') || trimmed.startsWith('<hr') || trimmed.startsWith('<pre') || trimmed.startsWith('__CODE_BLOCK_')) {
+                return trimmed;
+            }
+            return `<p class="my-1">${trimmed}</p>`;
+        });
+
+        processed = formattedLines.join('');
+
+        // Restore code blocks
+        codeBlocks.forEach((codeBlock, idx) => {
+            processed = processed.replace(`__CODE_BLOCK_${idx}__`, codeBlock);
+        });
+
+        return processed;
     };
 
     return (

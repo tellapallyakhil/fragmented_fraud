@@ -202,7 +202,7 @@ IMPORTANT:
         const geminiKey = process.env.GEMINI_API_KEY;
         if (geminiKey) {
             try {
-                const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${geminiKey}`;
+                const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
                 const geminiRes = await fetch(geminiUrl, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -215,7 +215,10 @@ IMPORTANT:
                         ],
                         generationConfig: {
                             temperature: 0.3,
-                            maxOutputTokens: 1000
+                            maxOutputTokens: 4096,
+                            thinkingConfig: {
+                                thinkingBudget: 0
+                            }
                         }
                     })
                 });

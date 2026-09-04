@@ -404,13 +404,27 @@ The subject account shows a strong correlation with known money laundering patte
                             <div
                                 className="prose prose-invert prose-sm max-w-none"
                                 dangerouslySetInnerHTML={{
-                                    __html: selectedReport.content!
-                                        .replace(/\n/g, '<br/>')
-                                        .replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold text-cyan-400 mt-4 mb-2">$1</h1>')
-                                        .replace(/^## (.+)$/gm, '<h2 class="text-lg font-bold text-purple-400 mt-3 mb-2">$1</h2>')
-                                        .replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-200">$1</strong>')
-                                        .replace(/`{3}([\s\S]*?)`{3}/g, '<pre class="bg-slate-800 p-3 rounded-lg my-3 overflow-x-auto text-xs text-cyan-300">$1</pre>')
-                                        .replace(/`([^`]+)`/g, '<code class="bg-slate-800 px-1 rounded text-cyan-300">$1</code>')
+                                    __html: (() => {
+                                        let raw = selectedReport.content || '';
+                                        // Headers
+                                        raw = raw.replace(/^### (.*$)/gim, '<h3 class="text-base font-bold text-cyan-300 mt-3 mb-1.5">$1</h3>');
+                                        raw = raw.replace(/^## (.*$)/gim, '<h2 class="text-lg font-bold text-purple-400 mt-4 mb-2">$1</h2>');
+                                        raw = raw.replace(/^# (.*$)/gim, '<h1 class="text-xl font-extrabold text-white mt-4 mb-2 pb-1 border-b border-slate-700">$1</h1>');
+                                        // Code blocks
+                                        raw = raw.replace(/`{3}([\s\S]*?)`{3}/g, '<pre class="bg-slate-800 p-3 rounded-lg my-3 overflow-x-auto text-xs text-cyan-300 font-mono"><code>$1</code></pre>');
+                                        raw = raw.replace(/`([^`]+)`/g, '<code class="bg-slate-800 px-1.5 py-0.5 rounded text-cyan-300 font-mono text-xs">$1</code>');
+                                        // Bullets
+                                        raw = raw.replace(/^[*\-•]\s+(.*$)/gim, '<div class="flex items-start gap-2 my-1 pl-2"><span class="text-cyan-400">•</span><span class="flex-1">$1</span></div>');
+                                        // Bold
+                                        raw = raw.replace(/\*\*(.+?)\*\*/g, '<strong class="text-cyan-200 font-semibold">$1</strong>');
+                                        // Newlines
+                                        return raw.split('\n').map(l => {
+                                            const t = l.trim();
+                                            if (!t) return '<div class="h-2"></div>';
+                                            if (t.startsWith('<div') || t.startsWith('<h') || t.startsWith('<pre')) return t;
+                                            return `<p class="my-1 text-slate-300">${t}</p>`;
+                                        }).join('');
+                                    })()
                                 }}
                             />
                         </CardContent>
