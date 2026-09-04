@@ -195,32 +195,51 @@ IMPORTANT:
 - Prioritize the most critical findings first
 `;
 
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost:3000",
-                "X-Title": "Salaar Bank Fraud Intel"
-            },
-            body: JSON.stringify({
-                model: "google/gemini-2.0-flash-exp:free",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: message }
-                ],
-                temperature: 0.3, // Lower temperature for more factual responses
-                max_tokens: 1000
-            })
-        });
+        const activeModels = [
+            "qwen/qwen-2.5-72b-instruct",
+            "deepseek/deepseek-chat",
+            "meta-llama/llama-3.3-70b-instruct"
+        ];
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API Error: ${response.status} - ${errorText}`);
+        let text = "";
+        let lastError = "";
+
+        for (const modelName of activeModels) {
+            try {
+                const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "http://localhost:3000",
+                        "X-Title": "Salaar Bank Fraud Intel"
+                    },
+                    body: JSON.stringify({
+                        model: modelName,
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: message }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 1000
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    text = data.choices?.[0]?.message?.content || "";
+                    if (text) break;
+                } else {
+                    lastError = await response.text();
+                }
+            } catch (err: any) {
+                lastError = err.message;
+            }
         }
 
-        const data = await response.json();
-        const text = data.choices[0]?.message?.content || "No response generated.";
+        if (!text) {
+            throw new Error(`All AI models failed. Last error: ${lastError}`);
+        }
 
         // Store the conversation for future RAG retrieval
         try {
