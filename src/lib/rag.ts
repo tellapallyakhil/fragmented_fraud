@@ -41,10 +41,9 @@ export async function storeDocument(doc: FraudDocument): Promise<{ success: bool
             .select('id')
             .single();
 
-        if (error) throw error;
+        if (error) return { success: false };
         return { success: true, id: data?.id };
     } catch (error) {
-        console.error('Error storing document:', error);
         return { success: false };
     }
 }
@@ -81,8 +80,7 @@ export async function retrieveDocuments(
 
         const { data, error } = await dbQuery.limit(50);
 
-        if (error) throw error;
-        if (!data || data.length === 0) return [];
+        if (error || !data || data.length === 0) return [];
 
         // Score documents by keyword overlap
         const scoredResults = data.map(doc => {
