@@ -204,12 +204,14 @@ IMPORTANT:
         let text = "";
         let lastError = "";
 
+        const apiKey = process.env.OPENROUTER_API_KEY;
+
         for (const modelName of activeModels) {
             try {
                 const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                     method: "POST",
                     headers: {
-                        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                        "Authorization": `Bearer ${apiKey}`,
                         "Content-Type": "application/json",
                         "HTTP-Referer": "http://localhost:3000",
                         "X-Title": "Salaar Bank Fraud Intel"
