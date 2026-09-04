@@ -955,6 +955,29 @@ export async function executeClusterQuarantine(targetAccountNumber: string, requ
                 .from('accounts')
                 .update({ is_frozen: true, risk_score: 95 })
                 .in('account_number', quarantinedAccNumbers);
+
+            // 📧 Send Real Account Frozen Email Notifications
+            const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+            const quarantinedAccountsList = (accounts || []).filter(a => quarantinedAccNumbers.includes(a.account_number));
+
+            for (const acc of quarantinedAccountsList) {
+                const profile = profileMap.get(acc.user_id);
+                const recipientEmail = profile?.email || 'tellapallyakhil89@gmail.com';
+                const recipientName = profile?.full_name || 'Valued Customer';
+
+                try {
+                    await sendAccountFrozenEmail({
+                        recipientEmail: recipientEmail.includes('@') ? recipientEmail : 'tellapallyakhil89@gmail.com',
+                        recipientName,
+                        frozenAccount: acc.account_number,
+                        reason: `Syndicate Blast-Radius Contagion from Seed: ${targetAccountNumber}`,
+                        frozenBy: 'Autonomous Containment Agent',
+                        caseId: `FRZ-${Date.now().toString().slice(-6)}`
+                    });
+                } catch (emailErr) {
+                    console.error(`Failed to send freeze email to ${recipientEmail}:`, emailErr);
+                }
+            }
         }
 
         return {
