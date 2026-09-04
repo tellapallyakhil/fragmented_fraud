@@ -422,45 +422,64 @@ export function FraudGraph({ elements, onNodeSelect }: FraudGraphProps) {
                         </button>
                     </div>
                     <div className="space-y-3 text-slate-300">
-                        {/* Metrics Breakdown */}
+                        {/* Account Metrics Breakdown */}
                         {selectedNode.metrics && (
                             <div className="grid grid-cols-2 gap-x-4 gap-y-2 py-2 border-y border-slate-800/50 my-2">
                                 <div>
-                                    <span className="text-slate-500 block text-[9px] uppercase">Device Reuse</span>
-                                    <span className={selectedNode.metrics.deviceReuse > 1 ? 'text-red-400 font-bold' : 'text-slate-300'}>
-                                        {selectedNode.metrics.deviceReuse} Users
+                                    <span className="text-slate-500 block text-[9px] uppercase">Hardware MAC Reuse</span>
+                                    <span className={(selectedNode.metrics.macReuse || 0) > 1 ? 'text-red-400 font-bold' : 'text-indigo-300 font-medium'}>
+                                        {selectedNode.metrics.macReuse || 0} Account(s)
                                     </span>
                                 </div>
                                 <div>
-                                    <span className="text-slate-500 block text-[9px] uppercase">IP Reuse</span>
-                                    <span className={selectedNode.metrics.ipReuse > 1 ? 'text-orange-400 font-bold' : 'text-slate-300'}>
-                                        {selectedNode.metrics.ipReuse} Users
+                                    <span className="text-slate-500 block text-[9px] uppercase">Device Collision</span>
+                                    <span className={(selectedNode.metrics.deviceReuse || 0) > 1 ? 'text-orange-400 font-bold' : 'text-slate-300'}>
+                                        {selectedNode.metrics.deviceReuse || 0} Device(s)
                                     </span>
                                 </div>
                                 <div>
                                     <span className="text-slate-500 block text-[9px] uppercase">Sync Score</span>
-                                    <span className={selectedNode.metrics.syncScore > 50 ? 'text-red-400 font-bold' : 'text-slate-300'}>
-                                        {selectedNode.metrics.syncScore}%
+                                    <span className={Number(selectedNode.metrics.syncScore || 0) > 50 ? 'text-red-400 font-bold' : 'text-slate-300'}>
+                                        {selectedNode.metrics.syncScore || 0}%
                                     </span>
                                 </div>
                                 <div>
-                                    <span className="text-slate-500 block text-[9px] uppercase">Node Degree</span>
-                                    <span className="text-cyan-400 font-bold">{selectedNode.metrics.degree} Links</span>
+                                    <span className="text-slate-500 block text-[9px] uppercase">Topology Degree</span>
+                                    <span className="text-cyan-400 font-bold">{selectedNode.metrics.degree || 0} Links</span>
                                 </div>
-                                {selectedNode.metrics.burst && (
+                                {selectedNode.metrics.burstMode && (
                                     <div className="col-span-2">
                                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-950/30 border border-red-900/50 text-red-500 text-[9px] font-bold uppercase">
-                                            🔥 Burst Activity Detected
+                                            🔥 Burst Velocity Attack Detected
                                         </span>
                                     </div>
                                 )}
-                                {selectedNode.metrics.threshold && (
+                                {selectedNode.metrics.thresholdDodging && (
                                     <div className="col-span-2">
                                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/30 border border-amber-900/50 text-amber-500 text-[9px] font-bold uppercase">
-                                            ⚠️ Threshold Avoidance (9k-10k)
+                                            ⚠️ Threshold Dodging Pattern (₹9k-₹10k / ₹40k-₹50k)
                                         </span>
                                     </div>
                                 )}
+                            </div>
+                        )}
+
+                        {/* Hardware Node Inspection (When MAC / Device / IP node is selected) */}
+                        {(selectedNode.type === 'mac' || selectedNode.type === 'device' || selectedNode.type === 'ip') && (
+                            <div className="p-2.5 rounded bg-slate-950/80 border border-indigo-900/50 space-y-1.5 font-mono text-[11px]">
+                                <div>
+                                    <span className="text-slate-500 text-[9px] block uppercase">Physical Layer Identifier</span>
+                                    <span className="text-indigo-300 font-bold">{selectedNode.label || selectedNode.id}</span>
+                                </div>
+                                {selectedNode.imei && (
+                                    <div>
+                                        <span className="text-slate-500 text-[9px] block uppercase">Chipset IMEI</span>
+                                        <span className="text-purple-400">{selectedNode.imei}</span>
+                                    </div>
+                                )}
+                                <div className="text-[10px] text-emerald-400 font-sans pt-1 border-t border-slate-800">
+                                    🔒 Immutable Hardware Root of Trust (defeats VPN IP rotation)
+                                </div>
                             </div>
                         )}
 
@@ -484,20 +503,19 @@ export function FraudGraph({ elements, onNodeSelect }: FraudGraphProps) {
                                         <span className="text-lg">🕵️‍♂️</span> Investigator's Note
                                     </strong>
 
-                                    {selectedNode.risk > 80 ? (
+                                    {selectedNode.isHacker || selectedNode.risk > 80 ? (
                                         <p>
-                                            <strong>{selectedNode.label}</strong> is acting as a <strong className="text-red-400">High-Velocity Hub</strong>.
-                                            This account is the <strong>common destination</strong> for funds from multiple unrelated sources.
-                                            The graph shows a "Fan-In" pattern typical of <strong className="text-red-400">Money Laundering</strong>.
+                                            <strong>{selectedNode.label}</strong> is flagged as a <strong className="text-red-400">Syndicate Hub / Attacker Target</strong>.
+                                            High degree centrality and hardware MAC persistence indicate organized money laundering.
                                         </p>
                                     ) : selectedNode.risk > 50 ? (
                                         <p>
-                                            This account is exhibiting <strong className="text-orange-400">Structuring Behavior</strong>.
-                                            We detected multiple small deposits representing a possible coordinated mule effort.
+                                            This account exhibits <strong className="text-orange-400">Elevated Structuring & Multi-Source Velocity</strong>.
+                                            Cross-verifying physical MAC address and device telemetry.
                                         </p>
                                     ) : (
                                         <p>
-                                            Currently behaves like a standard user. Monitoring for any sudden spikes in incoming volume from unknown sources.
+                                            Standard verified banking activity. Real-time telemetry monitoring for sudden velocity or hardware collision spikes.
                                         </p>
                                     )}
                                 </div>

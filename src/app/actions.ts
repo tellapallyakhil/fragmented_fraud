@@ -185,6 +185,11 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
                 if (inDegree >= 3 || maxMacReuse >= 3) riskScoreValue = Math.max(riskScoreValue, 85);
                 else if (inDegree >= 2 || maxMacReuse >= 2) riskScoreValue = Math.max(riskScoreValue, 65);
 
+                const isHackerEntity = profileMap.get(accountMap.get(accId)?.user_id)?.role === 'hacker' || accId === 'HACKER_X' || (accountByNumber.get(accId)?.account_number === 'HACKER_X');
+                if (isHackerEntity) {
+                    riskScoreValue = Math.max(riskScoreValue, 88);
+                }
+
                 const finalRiskScore = Math.min(100, riskScoreValue);
 
                 const label = (accId.startsWith('SAL_') ? accId : profileMap.get(accountMap.get(accId)?.user_id)?.full_name) || accId;
@@ -195,7 +200,7 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
                         id: accId,
                         label: maskedLabel,
                         type: 'account',
-                        isHacker: profileMap.get(accountMap.get(accId)?.user_id)?.role === 'hacker',
+                        isHacker: isHackerEntity,
                         risk: finalRiskScore,
                         metrics: {
                             macReuse: maxMacReuse,
@@ -207,7 +212,7 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
                             thresholdDodging
                         }
                     },
-                    classes: `${finalRiskScore > 80 ? 'critical-risk' : finalRiskScore > 50 ? 'high-risk' : finalRiskScore > 30 ? 'medium-risk' : ''} ${profileMap.get(accountMap.get(accId)?.user_id)?.role === 'hacker' ? 'hacker-node' : ''}`.trim()
+                    classes: `${finalRiskScore > 80 ? 'critical-risk' : finalRiskScore > 50 ? 'high-risk' : finalRiskScore > 30 ? 'medium-risk' : ''} ${isHackerEntity ? 'hacker-node' : ''}`.trim()
                 });
                 processedNodes.add(accId);
             }
