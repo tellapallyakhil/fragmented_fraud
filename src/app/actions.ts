@@ -233,17 +233,36 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
         }
     });
 
-    // 4️⃣ ALERT GENERATION (Fan-In Pattern Detection)
+    // 4️⃣ COMPREHENSIVE MULTI-VECTOR ALERT GENERATION
     const alerts: any[] = [];
+    let alertCounter = 1;
+
+    // A. Device Farm Collusions
+    deviceMap.forEach((accSet, devId) => {
+        if (accSet.size >= 2) {
+            const accNames = Array.from(accSet)
+                .map(id => accountMap.get(id)?.account_number || id)
+                .join(', ');
+            alerts.push({
+                id: `alert-dev-${alertCounter++}`,
+                title: `📱 HIGH: Device Farm Collusion (${accSet.size} Accounts)`,
+                severity: accSet.size >= 3 ? 'Critical' : 'High',
+                time: 'LIVE',
+                description: `Hardware canvas ${devId.substring(0, 12)}... is concurrently operating accounts: [${accNames}].`
+            });
+        }
+    });
+
+    // B. Fan-In Pattern Detection
     const maxInDegreeVal = Math.max(...Array.from(inDegreeMap.values()), 0);
     const topHackerNodeId = Array.from(inDegreeMap.entries())
-        .filter(([id]) => id !== 'SYSTEM_FREEZE') // Ignore system nodes
+        .filter(([id]) => id !== 'SYSTEM_FREEZE')
         .sort((a, b) => b[1] - a[1])[0]?.[0];
 
     if (maxInDegreeVal >= 3) {
         const suspectName = accountByNumber.get(topHackerNodeId!)?.account_number || topHackerNodeId;
         alerts.push({
-            id: 'alert-critical-fanin',
+            id: `alert-fanin-${alertCounter++}`,
             title: `🔴 CRITICAL: Aggregated Fan-In Cluster`,
             severity: 'Critical',
             time: 'LIVE',
@@ -252,11 +271,48 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
     } else if (maxInDegreeVal >= 2) {
         const suspectName = accountByNumber.get(topHackerNodeId!)?.account_number || topHackerNodeId;
         alerts.push({
-            id: 'alert-moderate-velocity',
+            id: `alert-fanin-${alertCounter++}`,
             title: `🟡 MODERATE: Multi-Source Inflow`,
             severity: 'Medium',
             time: 'LIVE',
             description: `Account "${suspectName}" is receiving funds from ${maxInDegreeVal} different accounts. Monitoring for "Mule" behavior.`
+        });
+    }
+
+    // C. Sub-Threshold Structuring (₹40,000–₹49,999 or ₹9,000–₹9,999)
+    const structuringList = transactions.filter(t => (t.amount >= 40000 && t.amount <= 49999) || (t.amount >= 9000 && t.amount <= 9999));
+    if (structuringList.length > 0) {
+        const latestStruct = structuringList[0];
+        alerts.push({
+            id: `alert-struct-${alertCounter++}`,
+            title: `💰 HIGH: AML Structuring / Smurfing Pattern`,
+            severity: 'High',
+            time: 'LIVE',
+            description: `Transaction of ₹${latestStruct.amount.toLocaleString('en-IN')} from ${latestStruct.from_name} to ${latestStruct.to_name} placed near regulatory reporting threshold.`
+        });
+    }
+
+    // D. Frozen Account Alerts
+    const frozenAccs = (accounts || []).filter(a => a.is_frozen);
+    frozenAccs.forEach(fa => {
+        alerts.push({
+            id: `alert-frz-${alertCounter++}`,
+            title: `⛔ RESTRICTION: Account Frozen (${fa.account_number})`,
+            severity: 'Critical',
+            time: 'ACTIVE',
+            description: `Account ${fa.account_number} is locked by the Autonomous Containment Agent. All outgoing liquidity halted.`
+        });
+    });
+
+    // E. High-Velocity / Recent Flows Fallback
+    if (alerts.length === 0 && transactions.length > 0) {
+        const recentTx = transactions[0];
+        alerts.push({
+            id: `alert-recent-${alertCounter++}`,
+            title: `⚡ ACTIVITY: Live Flow Monitor`,
+            severity: recentTx.amount >= 50000 ? 'High' : 'Medium',
+            time: 'LIVE',
+            description: `₹${recentTx.amount.toLocaleString('en-IN')} transferred from ${recentTx.from_name} to ${recentTx.to_name}. Risk score: evaluated clean.`
         });
     }
 
