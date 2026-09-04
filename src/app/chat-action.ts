@@ -195,52 +195,85 @@ IMPORTANT:
 - Prioritize the most critical findings first
 `;
 
-        const activeModels = [
-            "qwen/qwen-2.5-72b-instruct",
-            "deepseek/deepseek-chat",
-            "meta-llama/llama-3.3-70b-instruct"
-        ];
-
         let text = "";
         let lastError = "";
 
-        const apiKey = process.env.OPENROUTER_API_KEY;
-
-        for (const modelName of activeModels) {
+        // 1. PRIMARY: Native Google Gemini API
+        const geminiKey = process.env.GEMINI_API_KEY;
+        if (geminiKey) {
             try {
-                const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${geminiKey}`;
+                const geminiRes = await fetch(geminiUrl, {
                     method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${apiKey}`,
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "http://localhost:3000",
-                        "X-Title": "Salaar Bank Fraud Intel"
-                    },
+                    headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        model: modelName,
-                        messages: [
-                            { role: "system", content: systemPrompt },
-                            { role: "user", content: message }
+                        contents: [
+                            {
+                                role: "user",
+                                parts: [{ text: `${systemPrompt}\n\nUSER QUESTION: ${message}` }]
+                            }
                         ],
-                        temperature: 0.3,
-                        max_tokens: 1000
+                        generationConfig: {
+                            temperature: 0.3,
+                            maxOutputTokens: 1000
+                        }
                     })
                 });
 
-                if (response.ok) {
-                    const data = await response.json();
-                    text = data.choices?.[0]?.message?.content || "";
-                    if (text) break;
+                if (geminiRes.ok) {
+                    const gData = await geminiRes.json();
+                    text = gData.candidates?.[0]?.content?.parts?.[0]?.text || "";
                 } else {
-                    lastError = await response.text();
+                    lastError = await geminiRes.text();
                 }
-            } catch (err: any) {
-                lastError = err.message;
+            } catch (gErr: any) {
+                lastError = gErr.message;
+            }
+        }
+
+        // 2. SECONDARY: OpenRouter Fallback
+        if (!text) {
+            const openRouterKey = process.env.OPENROUTER_API_KEY;
+            const openRouterModels = [
+                "qwen/qwen-2.5-72b-instruct",
+                "deepseek/deepseek-chat",
+                "meta-llama/llama-3.3-70b-instruct"
+            ];
+
+            for (const modelName of openRouterModels) {
+                try {
+                    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${openRouterKey}`,
+                            "Content-Type": "application/json",
+                            "HTTP-Referer": "http://localhost:3000",
+                            "X-Title": "Salaar Bank Fraud Intel"
+                        },
+                        body: JSON.stringify({
+                            model: modelName,
+                            messages: [
+                                { role: "system", content: systemPrompt },
+                                { role: "user", content: message }
+                            ],
+                            temperature: 0.3,
+                            max_tokens: 1000
+                        })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        text = data.choices?.[0]?.message?.content || "";
+                        if (text) break;
+                    }
+                } catch (orErr: any) {
+                    lastError = orErr.message;
+                }
             }
         }
 
         if (!text) {
-            throw new Error(`All AI models failed. Last error: ${lastError}`);
+            throw new Error(`AI generation failed across all providers. Last error: ${lastError}`);
         }
 
         // Store the conversation for future RAG retrieval
