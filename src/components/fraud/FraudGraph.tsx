@@ -151,13 +151,23 @@ export function FraudGraph({ elements, onNodeSelect }: FraudGraphProps) {
                         }
                     },
                     {
+                        selector: 'node[type="mac"]',
+                        style: {
+                            'background-color': '#312e81',
+                            'border-color': '#818cf8',
+                            'shape': 'hexagon',
+                            'width': 32,
+                            'height': 32,
+                        }
+                    },
+                    {
                         selector: 'node[type="ip"]',
                         style: {
                             'background-color': '#064e3b',
                             'border-color': '#34d399',
                             'shape': 'diamond',
-                            'width': 28,
-                            'height': 28,
+                            'width': 26,
+                            'height': 26,
                         }
                     },
                     {
@@ -167,6 +177,16 @@ export function FraudGraph({ elements, onNodeSelect }: FraudGraphProps) {
                             'line-style': 'dashed',
                             'width': 2,
                             'opacity': 0.8,
+                            'target-arrow-shape': 'none'
+                        }
+                    },
+                    {
+                        selector: 'edge[type="hardware_link"]',
+                        style: {
+                            'line-color': '#818cf8',
+                            'line-style': 'solid',
+                            'width': 2.5,
+                            'opacity': 0.9,
                             'target-arrow-shape': 'none'
                         }
                     },

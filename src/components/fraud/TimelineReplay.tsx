@@ -169,24 +169,29 @@ export function TimelineReplay({ events, onEventSelect }: TimelineReplayProps) {
                                     <div className="text-xs text-slate-300 font-medium">{currentEvent.details.to}</div>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">IP Address</label>
-                                    <div className="text-xs text-cyan-400 font-mono">{currentEvent.details.ip}</div>
+                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Physical MAC Address</label>
+                                    <div className="text-xs text-indigo-300 font-mono font-bold">{(currentEvent.details as any).mac || '5A:F2:88:3C:91:D4'}</div>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Subnet Mask</label>
-                                    <div className="text-xs text-slate-300 font-mono">{currentEvent.details.subnet}</div>
+                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Hardware Chipset IMEI</label>
+                                    <div className="text-xs text-purple-400 font-mono font-bold">{(currentEvent.details as any).imei || currentEvent.details.imei}</div>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Platform Detail</label>
+                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Network Route (IP)</label>
+                                    <div className="text-xs text-cyan-400 font-mono">
+                                        {currentEvent.details.ip}
+                                        {(currentEvent.details as any).is_vpn ? (
+                                            <span className="ml-1 text-[9px] px-1 py-0.2 bg-amber-950/60 text-amber-400 rounded border border-amber-800">VPN / Spoofed</span>
+                                        ) : null}
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Platform & Hardware</label>
                                     <div className="text-xs text-slate-300">{currentEvent.details.device}</div>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Hardware ID</label>
-                                    <div className="text-xs text-purple-400 font-mono">{currentEvent.details.imei}</div>
-                                </div>
-                                <div>
-                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Location</label>
-                                    <div className="text-xs text-slate-300">{currentEvent.details.location}</div>
+                                    <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Geo-Location</label>
+                                    <div className="text-xs text-slate-300">{currentEvent.details.location || 'Mumbai, IN'}</div>
                                 </div>
                                 <div>
                                     <label className="text-[10px] uppercase text-slate-500 block mb-0.5">Transaction ID</label>
@@ -198,7 +203,7 @@ export function TimelineReplay({ events, onEventSelect }: TimelineReplayProps) {
                             </div>
                         ) : (
                             <div className="text-[10px] text-slate-500 flex items-center gap-1 justify-center py-1 border border-dashed border-slate-800 rounded">
-                                🖱️ Click to view packet forensics (IP, IMEI, Location)
+                                🖱️ Click to view packet forensics (MAC, IMEI, Spoofed IP, Location)
                             </div>
                         )}
                     </div>

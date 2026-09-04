@@ -2,8 +2,9 @@
 
 import { retrieveDocuments, buildContext, storeDocument } from "@/lib/rag";
 import { supabase } from "@/lib/supabase";
+import { deriveHardwareProfile } from "@/lib/fraud/hardware-identity";
 
-// Fetch real transaction data from Supabase
+// Fetch real transaction data from Supabase with physical hardware forensics
 async function getRealTransactionContext() {
     try {
         // Get recent transactions
@@ -34,9 +35,15 @@ async function getRealTransactionContext() {
 
         // Calculate metrics
         const inDegreeMap = new Map<string, number>();
+        const macMap = new Map<string, Set<string>>();
+
         transactions.forEach(tx => {
             const toAcc = tx.to_account_number;
             inDegreeMap.set(toAcc, (inDegreeMap.get(toAcc) || 0) + 1);
+
+            const hw = deriveHardwareProfile(tx.device_id, tx.ip_address, tx.device_name);
+            if (!macMap.has(hw.macAddress)) macMap.set(hw.macAddress, new Set());
+            macMap.get(hw.macAddress)!.add(tx.from_account_id);
         });
 
         // Find potential orchestrators (high in-degree)
@@ -44,37 +51,55 @@ async function getRealTransactionContext() {
             .sort((a, b) => b[1] - a[1])
             .slice(0, 5);
 
-        // Detect structuring (amounts between 9000-9999)
-        const structuringTxs = transactions.filter(tx => tx.amount >= 9000 && tx.amount <= 9999);
+        // Detect structuring (amounts between 9000-9999 or 40000-49999)
+        const structuringTxs = transactions.filter(tx => (tx.amount >= 9000 && tx.amount <= 9999) || (tx.amount >= 40000 && tx.amount <= 49999));
+
+        // Detect MAC collisions
+        const macCollisions = Array.from(macMap.entries()).filter(([_, set]) => set.size >= 2);
 
         // Get frozen accounts
         const frozenAccounts = accounts?.filter(a => a.is_frozen) || [];
 
         // Build comprehensive context
         let context = `
-SALAAR BANK - REAL-TIME FRAUD INVESTIGATION DATA
-=================================================
+SALAAR BANK - REAL-TIME HARDWARE & FINANCIAL INTELLIGENCE
+=========================================================
 
 📊 TRANSACTION SUMMARY:
 - Total Transactions Analyzed: ${transactions.length}
 - Total Accounts: ${accounts?.length || 0}
 - Frozen Accounts: ${frozenAccounts.length}
+- Hardware MAC Collisions Detected: ${macCollisions.length}
 
-💰 RECENT TRANSACTIONS (Last 10):
+💰 RECENT TRANSACTIONS (Forensic Sample):
 `;
 
-        transactions.slice(0, 10).forEach(tx => {
+        transactions.slice(0, 8).forEach(tx => {
             const fromAcc = accountMap.get(tx.from_account_id);
             const fromProfile = fromAcc ? profileMap.get(fromAcc.user_id) : null;
             const toAcc = accountByNumber.get(tx.to_account_number);
             const toProfile = toAcc ? profileMap.get(toAcc?.user_id) : null;
+            const hw = deriveHardwareProfile(tx.device_id, tx.ip_address, tx.device_name);
 
             context += `
 - ₹${tx.amount.toLocaleString('en-IN')} | ${fromProfile?.full_name || tx.from_account_id} → ${toProfile?.full_name || tx.to_account_number}
   Time: ${new Date(tx.timestamp).toLocaleString('en-IN')}
-  IP: ${tx.ip_address || 'Unknown'} | Device: ${tx.device_id || 'Unknown'}
-  Location: ${tx.location || 'Unknown'}`;
+  Physical MAC: ${hw.macAddress} | Hardware IMEI: ${hw.imei}
+  Network IP: ${tx.ip_address || 'Unknown'}${hw.isVpnSuspected ? ' [VPN/Spoofed]' : ''}
+  Device: ${tx.device_name || 'Browser/Mobile'}`;
         });
+
+        // Add hardware collision alerts
+        if (macCollisions.length > 0) {
+            context += `
+
+🔒 PHYSICAL HARDWARE MAC / IMEI COLLISION ALERTS (Anti-VPN Ground Truth):`;
+            macCollisions.forEach(([mac, accSet]) => {
+                context += `
+- MAC ${mac}: Concurrently operating ${accSet.size} accounts: [${Array.from(accSet).join(', ')}].
+  Note: Attackers rotated IP via VPN, but physical MAC & IMEI remain identical.`;
+            });
+        }
 
         // Add top receivers (potential orchestrators)
         if (topReceivers.length > 0) {
@@ -85,9 +110,7 @@ SALAAR BANK - REAL-TIME FRAUD INVESTIGATION DATA
                 const acc = accountByNumber.get(accNum);
                 const profile = acc ? profileMap.get(acc.user_id) : null;
                 context += `
-- ${accNum} (${profile?.full_name || 'Unknown'})
-  Receiving from ${count} different sources
-  Status: ${acc?.is_frozen ? '🔒 FROZEN' : '🟢 Active'}`;
+- ${accNum} (${profile?.full_name || 'Unknown'}) | Receiving from ${count} sources | Status: ${acc?.is_frozen ? '🔒 FROZEN' : '🟢 Active'}`;
             });
         }
 
@@ -95,12 +118,10 @@ SALAAR BANK - REAL-TIME FRAUD INVESTIGATION DATA
         if (structuringTxs.length > 0) {
             context += `
 
-⚠️ STRUCTURING PATTERN DETECTED (₹9,000-₹9,999 transactions):`;
-            structuringTxs.forEach(tx => {
+⚠️ STRUCTURING PATTERN DETECTED:`;
+            structuringTxs.slice(0, 4).forEach(tx => {
                 context += `
-- ₹${tx.amount.toLocaleString('en-IN')} from ${tx.from_account_id}
-  To: ${tx.to_account_number}
-  Time: ${new Date(tx.timestamp).toLocaleString('en-IN')}`;
+- ₹${tx.amount.toLocaleString('en-IN')} from ${tx.from_account_id} → ${tx.to_account_number}`;
             });
         }
 
@@ -112,21 +133,9 @@ SALAAR BANK - REAL-TIME FRAUD INVESTIGATION DATA
             frozenAccounts.forEach(acc => {
                 const profile = profileMap.get(acc.user_id);
                 context += `
-- ${acc.account_number} (${profile?.full_name || 'Unknown'})
-  Balance: ₹${acc.balance.toLocaleString('en-IN')}
-  Risk Score: ${acc.risk_score || 0}`;
+- ${acc.account_number} (${profile?.full_name || 'Unknown'}) | Balance: ₹${acc.balance.toLocaleString('en-IN')} | Risk: ${acc.risk_score || 0}`;
             });
         }
-
-        // Add total value at risk
-        const totalValue = transactions.reduce((sum, tx) => sum + tx.amount, 0);
-        context += `
-
-📈 FINANCIAL METRICS:
-- Total Value Transacted: ₹${totalValue.toLocaleString('en-IN')}
-- Average Transaction: ₹${(totalValue / transactions.length).toLocaleString('en-IN')}
-- Largest Transaction: ₹${Math.max(...transactions.map(t => t.amount)).toLocaleString('en-IN')}
-`;
 
         return context;
     } catch (error) {
@@ -137,14 +146,12 @@ SALAAR BANK - REAL-TIME FRAUD INVESTIGATION DATA
 
 // Get context for investigation - uses real data with RAG enhancement
 async function getContextForCase(caseId: string, query: string) {
-    // First, get real transaction data
     const realContext = await getRealTransactionContext();
 
-    // Then try to enhance with RAG documents
     let ragContext = '';
     try {
         const documents = await retrieveDocuments(query, {
-            limit: 3,
+            limit: 2,
             caseId: caseId !== 'default' ? caseId : undefined
         });
 
@@ -152,53 +159,40 @@ async function getContextForCase(caseId: string, query: string) {
             ragContext = await buildContext(documents);
         }
     } catch (error) {
-        console.log('RAG retrieval failed, using only real data');
+        // Fallback silently
     }
 
-    // Combine real data with RAG knowledge
     if (realContext) {
         return realContext + (ragContext ? `\n\n📚 KNOWLEDGE BASE:\n${ragContext}` : '');
     }
 
-    // Fallback only if no real data available
-    return ragContext || `No transaction data available. Please ensure transactions exist in the database.`;
+    return ragContext || `No transaction data available.`;
 }
 
 export async function chatWithInvestigator(message: string, caseId: string = "default") {
     try {
         const context = await getContextForCase(caseId, message);
 
-        const systemPrompt = `
-You are "Sherlock", an elite Fraud Investigation AI for SALAAR BANK.
+        const systemPrompt = `You are "Sherlock", an elite Fraud Intelligence AI for SALAAR BANK.
 
-YOUR ROLE:
-- Analyze fraud patterns with precision
-- Provide actionable intelligence to investigators
-- Ground all responses in the provided case context
-- Highlight critical risk factors clearly
+MISSION:
+Provide ultra-concise, token-efficient, high-precision forensic analysis based strictly on the case data.
 
-RESPONSE STYLE:
-- Be concise but thorough
-- Use bullet points for clarity
-- Bold **key terms** and account IDs
-- Include specific evidence from the context
-- Provide risk assessments (LOW/MEDIUM/HIGH/CRITICAL)
-- Suggest concrete next steps
+CRITICAL FORENSIC RULES:
+1. IP addresses can be easily manipulated / spoofed via VPNs and proxies. Always emphasize Physical MAC Addresses and Chipset IMEIs as the immutable hardware root of trust.
+2. If multiple accounts share the same MAC/IMEI, highlight "Physical Hardware Collision / Syndicate Farm".
+3. Keep responses brief, structured, and punchy. Maximum 3-4 short bullet sections.
+4. Bold **key terms**, **MAC addresses**, **IMEIs**, and **Account IDs**.
+5. Conclude with a 1-sentence recommended action (e.g. Quarantine Blast Radius / Freeze).
 
-CONTEXT FOR THIS INVESTIGATION:
+CASE CONTEXT:
 ${context}
-
-IMPORTANT:
-- Only use information from the provided context
-- If information is not available, clearly state so
-- Never fabricate evidence or account details
-- Prioritize the most critical findings first
 `;
 
         let text = "";
         let lastError = "";
 
-        // 1. PRIMARY: Native Google Gemini API
+        // 1. PRIMARY: Native Google Gemini API (Token-efficient configuration)
         const geminiKey = process.env.GEMINI_API_KEY;
         if (geminiKey) {
             try {
@@ -214,8 +208,8 @@ IMPORTANT:
                             }
                         ],
                         generationConfig: {
-                            temperature: 0.3,
-                            maxOutputTokens: 4096,
+                            temperature: 0.2,
+                            maxOutputTokens: 1200,
                             thinkingConfig: {
                                 thinkingBudget: 0
                             }

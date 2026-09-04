@@ -3,10 +3,12 @@
 // Production-grade graph analysis for Money Mule Rings, Syndicates, and Blast Radius
 // ============================================================================
 
+import { deriveHardwareProfile } from './hardware-identity';
+
 export interface GraphNode {
     id: string;
     label: string;
-    type: 'ACCOUNT' | 'USER' | 'DEVICE' | 'IP' | 'MERCHANT' | 'LOCATION';
+    type: 'ACCOUNT' | 'USER' | 'DEVICE' | 'MAC' | 'IMEI' | 'IP' | 'MERCHANT' | 'LOCATION';
     riskScore: number;
     metadata: Record<string, any>;
 }
@@ -367,19 +369,24 @@ export function buildHeterogeneousGraph(
             }
         });
 
-        // Heterogeneous: Link Device Node
-        if (tx.device_id) {
-            const devNodeId = `dev_${tx.device_id}`;
+        // Heterogeneous: Link Physical Hardware Identity (MAC & IMEI)
+        if (tx.device_id || tx.ip_address) {
+            const hw = deriveHardwareProfile(tx.device_id, tx.ip_address, tx.device_name);
+            const devNodeId = `dev_${tx.device_id || 'unknown_hw'}`;
+            const macNodeId = `mac_${hw.macAddress}`;
+
             if (!nodeSet.has(devNodeId)) {
                 nodes.push({
                     id: devNodeId,
-                    label: `📱 ${tx.device_name || 'Hardware ID'}`,
+                    label: `📱 ${tx.device_name || 'Hardware Platform'}`,
                     type: 'DEVICE',
                     riskScore: 30,
-                    metadata: { deviceId: tx.device_id, imei: tx.imei }
+                    metadata: { deviceId: tx.device_id, imei: hw.imei, mac: hw.macAddress }
                 });
                 nodeSet.add(devNodeId);
             }
+
+            // Link Sender -> Device
             edges.push({
                 id: `edge_dev_${senderNodeId}_${devNodeId}`,
                 source: senderNodeId,
@@ -387,28 +394,48 @@ export function buildHeterogeneousGraph(
                 label: 'OPERATED_ON',
                 weight: 0.5
             });
-        }
 
-        // Heterogeneous: Link IP Subnet Node
-        if (tx.ip_address) {
-            const ipNodeId = `ip_${tx.ip_address}`;
-            if (!nodeSet.has(ipNodeId)) {
+            // Physical Layer-2 MAC Root of Trust Node
+            if (!nodeSet.has(macNodeId)) {
                 nodes.push({
-                    id: ipNodeId,
-                    label: `🌐 ${tx.ip_address}`,
-                    type: 'IP',
-                    riskScore: 20,
-                    metadata: { ip: tx.ip_address, subnet: tx.subnet_mask }
+                    id: macNodeId,
+                    label: `🔒 MAC: ${hw.macAddress}`,
+                    type: 'MAC',
+                    riskScore: hw.isVpnSuspected ? 65 : 25,
+                    metadata: { mac: hw.macAddress, imei: hw.imei, isVpn: hw.isVpnSuspected }
                 });
-                nodeSet.add(ipNodeId);
+                nodeSet.add(macNodeId);
             }
+
             edges.push({
-                id: `edge_ip_${senderNodeId}_${ipNodeId}`,
-                source: senderNodeId,
-                target: ipNodeId,
-                label: 'ROUTED_VIA',
-                weight: 0.5
+                id: `edge_mac_${devNodeId}_${macNodeId}`,
+                source: devNodeId,
+                target: macNodeId,
+                label: 'PHYSICAL_MAC',
+                weight: 0.8
             });
+
+            // If IP is present, link MAC -> IP to visualize VPN/Network spoofing layer
+            if (tx.ip_address) {
+                const ipNodeId = `ip_${tx.ip_address}`;
+                if (!nodeSet.has(ipNodeId)) {
+                    nodes.push({
+                        id: ipNodeId,
+                        label: `🌐 IP: ${tx.ip_address}${hw.isVpnSuspected ? ' (VPN)' : ''}`,
+                        type: 'IP',
+                        riskScore: hw.isVpnSuspected ? 70 : 15,
+                        metadata: { ip: tx.ip_address, isVpn: hw.isVpnSuspected }
+                    });
+                    nodeSet.add(ipNodeId);
+                }
+                edges.push({
+                    id: `edge_ip_${macNodeId}_${ipNodeId}`,
+                    source: macNodeId,
+                    target: ipNodeId,
+                    label: hw.isVpnSuspected ? 'VPN_TUNNELED' : 'ROUTED_VIA',
+                    weight: 0.4
+                });
+            }
         }
     });
 

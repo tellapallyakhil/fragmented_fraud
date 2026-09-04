@@ -11,6 +11,7 @@ import { buildHeterogeneousGraph, calculateBlastRadius } from '@/lib/fraud/knowl
 import { evaluateComprehensiveRisk, ExplainableRiskResult } from '@/lib/fraud/risk-engine';
 import { screenAgainstSanctionsWatchlist } from '@/lib/fraud/sanctions-screening';
 import { AutonomousFIUOrchestrator } from '@/lib/fiu/agent-orchestrator';
+import { deriveHardwareProfile } from '@/lib/fraud/hardware-identity';
 
 // Wrapper for email test function (server actions require async function exports)
 export async function sendTestEmailAction(toEmail: string) {
@@ -72,8 +73,10 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
     const accountByNumber = new Map(accounts?.map(a => [a.account_number, a]) || []);
     const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
 
-    // 2️⃣ METRIC TRACKERS
+    // 2️⃣ METRIC TRACKERS (Prioritizing Immutable Physical MAC & IMEI over Spoofable IPs)
     const deviceMap = new Map<string, Set<string>>();
+    const macMap = new Map<string, Set<string>>();
+    const imeiMap = new Map<string, Set<string>>();
     const ipMap = new Map<string, Set<string>>();
     const accountTxsMap = new Map<string, any[]>();
     const inDegreeMap = new Map<string, number>();
@@ -86,8 +89,14 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
         const fromProfile = fromAccount ? profileMap.get(fromAccount.user_id) : null;
         const toProfile = toAccount ? profileMap.get(toAccount.user_id) : null;
 
+        // Derive physical hardware footprint (MAC & IMEI)
+        const hw = deriveHardwareProfile(tx.device_id, tx.ip_address, tx.device_name);
+
         const transformed = {
             ...tx,
+            mac_address: hw.macAddress,
+            imei: hw.imei,
+            is_vpn: hw.isVpnSuspected,
             from_name: fromProfile?.full_name || 'Unknown',
             to_account_id: toAccount?.id || tx.to_account_number,
             to_name: toProfile?.full_name || tx.to_account_number,
@@ -96,6 +105,14 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
         if (tx.device_id) {
             if (!deviceMap.has(tx.device_id)) deviceMap.set(tx.device_id, new Set());
             deviceMap.get(tx.device_id)!.add(tx.from_account_id);
+        }
+        if (hw.macAddress) {
+            if (!macMap.has(hw.macAddress)) macMap.set(hw.macAddress, new Set());
+            macMap.get(hw.macAddress)!.add(tx.from_account_id);
+        }
+        if (hw.imei) {
+            if (!imeiMap.has(hw.imei)) imeiMap.set(hw.imei, new Set());
+            imeiMap.get(hw.imei)!.add(tx.from_account_id);
         }
         if (tx.ip_address) {
             if (!ipMap.has(tx.ip_address)) ipMap.set(tx.ip_address, new Set());
@@ -133,7 +150,9 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
     transactions.forEach(tx => {
         [tx.from_account_id, tx.to_account_id].forEach(accId => {
             if (!processedNodes.has(accId)) {
-                // Identity Sharing Metrics
+                // Physical Hardware Sharing Metrics (MAC & IMEI Collision)
+                let maxMacReuse = 0;
+                macMap.forEach(users => { if (users.has(accId)) maxMacReuse = Math.max(maxMacReuse, users.size); });
                 let maxDeviceReuse = 0;
                 deviceMap.forEach(users => { if (users.has(accId)) maxDeviceReuse = Math.max(maxDeviceReuse, users.size); });
                 let maxIpReuse = 0;
@@ -148,23 +167,23 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
                 const thresholdDodging = transactions.some(t => t.from_account_id === accId && t.amount >= 9000 && t.amount <= 9999);
 
                 // 🛑 FINAL WEIGHTED RISK SCORE
-                // Risk = (DeviceReuse*0.2) + (IPReuse*0.15) + (TimeSync*0.25) + (Centrality/FanIn*0.4)
+                // Physical MAC Hardware weight (30%) + TimeSync (25%) + FanIn (35%) + IP (10%)
                 const inDegree = inDegreeMap.get(accId) || 0;
-                const centralityBonus = Math.min(1, inDegree / 3) * 100; // Max bonus if 3+ senders
+                const centralityBonus = Math.min(1, inDegree / 3) * 100;
 
                 let riskScoreValue = (
-                    (Math.min(maxDeviceReuse, 5) / 5 * 100 * 0.20) +
-                    (Math.min(maxIpReuse, 5) / 5 * 100 * 0.15) +
+                    (Math.min(maxMacReuse, 5) / 5 * 100 * 0.30) +
+                    (Math.min(maxIpReuse, 5) / 5 * 100 * 0.10) +
                     (normalizedSync * 100 * 0.25) +
-                    (centralityBonus * 0.40)
+                    (centralityBonus * 0.35)
                 );
 
                 if (burstMode) riskScoreValue += 15;
                 if (thresholdDodging) riskScoreValue += 20;
 
-                // Orchestrator detection: If in-degree is very high, force a high baseline risk
-                if (inDegree >= 3) riskScoreValue = Math.max(riskScoreValue, 85);
-                else if (inDegree >= 2) riskScoreValue = Math.max(riskScoreValue, 65);
+                // Orchestrator detection: If in-degree is high or hardware collision occurs
+                if (inDegree >= 3 || maxMacReuse >= 3) riskScoreValue = Math.max(riskScoreValue, 85);
+                else if (inDegree >= 2 || maxMacReuse >= 2) riskScoreValue = Math.max(riskScoreValue, 65);
 
                 const finalRiskScore = Math.min(100, riskScoreValue);
 
@@ -179,6 +198,7 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
                         isHacker: profileMap.get(accountMap.get(accId)?.user_id)?.role === 'hacker',
                         risk: finalRiskScore,
                         metrics: {
+                            macReuse: maxMacReuse,
                             deviceReuse: maxDeviceReuse,
                             ipReuse: maxIpReuse,
                             syncScore: (normalizedSync * 100).toFixed(0),
@@ -197,14 +217,17 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
             data: { source: tx.from_account_id, target: tx.to_account_id, type: 'transfer', amount: tx.amount }
         });
 
-        // 🔗 FORENSIC ENTITY CHAIN (Account -> Device -> IP)
-        if (tx.device_id) {
-            const devId = tx.device_id;
+        // 🔗 FORENSIC HARDWARE ENTITY CHAIN (Account -> Device -> Physical MAC -> IP/VPN)
+        if (tx.device_id || tx.mac_address) {
+            const devId = tx.device_id || 'unknown_hw';
+            const macId = tx.mac_address;
+
+            // 1. Device Platform Node
             if (!processedNodes.has(devId)) {
                 nodes.push({
                     data: {
                         id: devId,
-                        label: `Device: ${devId.substring(0, 8)}...`,
+                        label: `Device: ${tx.device_name || 'Hardware ID'}`,
                         type: 'device',
                         risk: (deviceMap.get(devId)?.size || 0) > 1 ? 75 : 15
                     },
@@ -214,21 +237,41 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
             }
             edges.push({ data: { source: tx.from_account_id, target: devId, type: 'device_link' } });
 
+            // 2. Physical MAC Root of Trust Node (Immutable Silicon Layer)
+            if (macId && !processedNodes.has(macId)) {
+                const macCollisionCount = macMap.get(macId)?.size || 1;
+                nodes.push({
+                    data: {
+                        id: macId,
+                        label: `MAC: ${macId}`,
+                        type: 'mac',
+                        imei: tx.imei,
+                        risk: macCollisionCount > 1 ? 90 : 15
+                    },
+                    classes: macCollisionCount > 1 ? 'critical-risk' : ''
+                });
+                processedNodes.add(macId);
+            }
+            if (macId) {
+                edges.push({ data: { source: devId, target: macId, type: 'hardware_link' } });
+            }
+
+            // 3. Network Routing Node (Flagging VPN / Tunnel layer)
             if (tx.ip_address) {
                 const ipId = tx.ip_address;
                 if (!processedNodes.has(ipId)) {
                     nodes.push({
                         data: {
                             id: ipId,
-                            label: `IP: ${ipId}`,
+                            label: `IP: ${ipId}${tx.is_vpn ? ' (VPN)' : ''}`,
                             type: 'ip',
-                            risk: (ipMap.get(ipId)?.size || 0) > 1 ? 70 : 10
+                            risk: tx.is_vpn ? 70 : 10
                         },
-                        classes: (ipMap.get(ipId)?.size || 0) > 1 ? 'medium-risk' : ''
+                        classes: tx.is_vpn ? 'medium-risk' : ''
                     });
                     processedNodes.add(ipId);
                 }
-                edges.push({ data: { source: devId, target: ipId, type: 'network_link' } });
+                edges.push({ data: { source: macId || devId, target: ipId, type: 'network_link' } });
             }
         }
     });
@@ -237,18 +280,18 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
     const alerts: any[] = [];
     let alertCounter = 1;
 
-    // A. Device Farm Collusions
-    deviceMap.forEach((accSet, devId) => {
+    // A. Physical MAC Hardware Collusions (Single Device controlling multiple accounts)
+    macMap.forEach((accSet, macAddress) => {
         if (accSet.size >= 2) {
             const accNames = Array.from(accSet)
                 .map(id => accountMap.get(id)?.account_number || id)
                 .join(', ');
             alerts.push({
-                id: `alert-dev-${alertCounter++}`,
-                title: `📱 HIGH: Device Farm Collusion (${accSet.size} Accounts)`,
+                id: `alert-mac-${alertCounter++}`,
+                title: `🔒 CRITICAL: Physical MAC / IMEI Collision (${accSet.size} Accounts)`,
                 severity: accSet.size >= 3 ? 'Critical' : 'High',
                 time: 'LIVE',
-                description: `Hardware canvas ${devId.substring(0, 12)}... is concurrently operating accounts: [${accNames}].`
+                description: `Immutable MAC [${macAddress}] is concurrently controlling accounts: [${accNames}]. Hardware fingerprint confirms identity collision despite IP rotation.`
             });
         }
     });
@@ -325,11 +368,6 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
     return {
         graphElements: [...nodes, ...edges],
         timelineEvents: transactions.map(tx => {
-            // Risk Classification:
-            // - critical: Large amounts (>50k) - likely money laundering
-            // - high: Threshold dodging pattern (9000-9999 to avoid 10k reporting)
-            // - medium: Elevated amounts (5000-50000)
-            // - low: Normal banking activity (<5000)
             let riskLevel = 'low';
             if (tx.amount > 50000) riskLevel = 'critical';
             else if (tx.amount >= 9000 && tx.amount <= 9999) riskLevel = 'high';
@@ -346,11 +384,13 @@ export async function getRealFraudData(requesterId?: string, forceUnmask: boolea
                     from: tx.from_name,
                     to: tx.to_name,
                     time: tx.timestamp,
+                    mac: tx.mac_address,
+                    imei: tx.imei,
                     ip: tx.ip_address || 'Unknown',
+                    is_vpn: tx.is_vpn,
                     subnet: tx.ip_address && tx.ip_address.includes('.')
                         ? tx.ip_address.split('.').slice(0, 3).join('.') + '.0'
                         : 'Unknown',
-                    imei: tx.device_id || 'Unknown Hardware ID',
                     device: tx.device_name || 'Web Browser'
                 }
             };
