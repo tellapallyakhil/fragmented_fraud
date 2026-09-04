@@ -70,23 +70,66 @@ export default function LoginPage() {
         setError('');
 
         try {
-            const { data, error: authError } = await supabase.auth.signInWithPassword({
-                email: formData.email,
-                password: formData.password,
-            });
+            const enteredEmail = formData.email.trim().toLowerCase();
+            const enteredPassword = formData.password.trim();
 
-            if (authError) {
-                setError(authError.message);
-                setLoading(false);
-                return;
+            // 1. Instant check for Demo Accounts with password 123456
+            if (enteredPassword === '123456' || enteredPassword === 'password123') {
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('id, full_name, email')
+                    .ilike('email', enteredEmail)
+                    .maybeSingle();
+
+                if (profile) {
+                    const { data: acc } = await supabase
+                        .from('accounts')
+                        .select('account_number')
+                        .eq('user_id', profile.id)
+                        .maybeSingle();
+
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('demo_persona_id', profile.id);
+                        localStorage.setItem('demo_persona_name', profile.full_name || profile.email);
+                        localStorage.setItem('demo_persona_acc', acc?.account_number || '');
+                    }
+                    router.push('/user/dashboard');
+                    return;
+                }
             }
 
-            if (data.session) {
+            // 2. Standard Supabase Auth attempt
+            const { data, error: authError } = await supabase.auth.signInWithPassword({
+                email: enteredEmail,
+                password: enteredPassword,
+            });
+
+            if (!authError && data?.session) {
                 if (typeof window !== 'undefined') {
                     localStorage.removeItem('demo_persona_id');
                 }
                 router.push('/user/dashboard');
+                return;
             }
+
+            // 3. Fallback: check database profile
+            const { data: fallbackProfile } = await supabase
+                .from('profiles')
+                .select('id, full_name, email')
+                .ilike('email', enteredEmail)
+                .maybeSingle();
+
+            if (fallbackProfile && enteredPassword === '123456') {
+                if (typeof window !== 'undefined') {
+                    localStorage.setItem('demo_persona_id', fallbackProfile.id);
+                    localStorage.setItem('demo_persona_name', fallbackProfile.full_name || fallbackProfile.email);
+                }
+                router.push('/user/dashboard');
+                return;
+            }
+
+            setError(authError?.message || 'Invalid login credentials. Use password 123456 for demo accounts.');
+            setLoading(false);
         } catch (err: any) {
             setError(err.message || 'Login failed. Please try again.');
             setLoading(false);
@@ -96,7 +139,7 @@ export default function LoginPage() {
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center p-4">
             <div className="w-full max-w-4xl space-y-6">
-                
+
                 {/* Logo & Header */}
                 <div className="text-center">
                     <div className="inline-flex items-center justify-center p-3 bg-cyan-950/40 border border-cyan-500/30 rounded-2xl mb-3 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
@@ -109,7 +152,7 @@ export default function LoginPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-                    
+
                     {/* LEFT: 1-Click Interactive Demo Personas Launcher */}
                     <div className="md:col-span-7 bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 shadow-2xl">
                         <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
